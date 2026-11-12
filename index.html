@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vietnamese Traffic Sign Detection — Training Report</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17243a;
+      --muted: #526179;
+      --line: #dce4ef;
+      --accent: #1457a6;
+      --pale: #f3f7fc;
+    }
+    * { box-sizing: border-box; }
+    body {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 34px 26px 56px;
+      color: var(--ink);
+      background: #fff;
+      font: 16px/1.58 "Segoe UI", Arial, sans-serif;
+    }
+    h1, h2, h3 { line-height: 1.2; }
+    h1 { margin: 0 0 8px; font-size: 2.2rem; }
+    h2 { margin-top: 40px; padding-bottom: 9px; border-bottom: 1px solid var(--line); }
+    h3 { margin-top: 25px; }
+    .subtitle, .note, figcaption { color: var(--muted); }
+    .hero {
+      padding: 28px 30px;
+      border-radius: 14px;
+      background: linear-gradient(120deg, #edf5ff, #f8fbff);
+      border: 1px solid var(--line);
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 22px 0 8px;
+    }
+    .metric {
+      padding: 14px;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    .metric strong { display: block; color: var(--accent); font-size: 1.45rem; }
+    .metric span { color: var(--muted); font-size: .88rem; }
+    table { width: 100%; border-collapse: collapse; margin: 15px 0 22px; }
+    th, td { padding: 9px 11px; border: 1px solid var(--line); text-align: left; }
+    th { background: var(--pale); }
+    figure { margin: 22px 0; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
+    figure img { display: block; width: 100%; height: auto; }
+    figcaption { margin-top: 9px; font-size: .92rem; }
+    .callout { padding: 14px 17px; background: var(--pale); border-left: 4px solid var(--accent); }
+    .small { font-size: .9rem; }
+    @media (max-width: 700px) {
+      body { padding: 20px 14px 40px; }
+      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      h1 { font-size: 1.8rem; }
+    }
+    @media print {
+      body { max-width: none; padding: 0; font-size: 11pt; }
+      h2 { break-after: avoid; }
+      figure { break-inside: avoid; }
+      .hero { background: #f5f8fc; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <h1>Vietnamese Traffic Sign Detection</h1>
+    <div class="subtitle">Object detection training and held-out test evaluation | YOLO26n</div>
+    <p>
+      This report summarizes the data preparation, training configuration, and evaluation recorded
+      in the supplied notebook and saved Ultralytics run outputs.
+    </p>
+    <div class="summary" aria-label="Test metrics">
+      <div class="metric"><strong>0.9727</strong><span>Test mAP@0.50</span></div>
+      <div class="metric"><strong>0.7836</strong><span>Test mAP@0.50:0.95</span></div>
+      <div class="metric"><strong>0.9686</strong><span>Mean precision</span></div>
+      <div class="metric"><strong>0.9633</strong><span>Mean recall</span></div>
+    </div>
+  </header>
+
+  <main>
+    <h2>1. Data preparation</h2>
+    <h3>Dataset and splits</h3>
+    <p>
+      The notebook loads Roboflow's <em>Vietnamese-Traffic-Signs-Detection-7</em> dataset in
+      YOLO format. The code used the dataset's existing train, validation, and test folders; although
+      a 10% train-to-validation split is described in comments and configured as a variable, that
+      split code is commented out. The recorded input counts were:
+    </p>
+    <table>
+      <thead><tr><th>Split</th><th>Images before preprocessing</th><th>Use</th></tr></thead>
+      <tbody>
+        <tr><td>Train</td><td>2,118</td><td>Deduplication and augmentation, then model fitting</td></tr>
+        <tr><td>Validation</td><td>196</td><td>Training-time model selection and validation metrics</td></tr>
+        <tr><td>Test</td><td>103</td><td>Final held-out evaluation</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Class balance, duplicate filtering, and augmentation</h3>
+    <p>
+      Before filtering, the training labels contained 2,730 object instances. Three classes exceeded
+      the notebook's 400-instance threshold and were treated as heavy classes; the speed-limit class
+      was the only class below the 200-instance rare-class threshold.
+    </p>
+    <table>
+      <thead><tr><th>Class</th><th>Instances before deduplication</th><th>Instances after deduplication</th></tr></thead>
+      <tbody>
+        <tr><td>No U-turn</td><td>252</td><td>252</td></tr>
+        <tr><td>No going opposite</td><td>573</td><td>215</td></tr>
+        <tr><td>No stopping</td><td>504</td><td>225</td></tr>
+        <tr><td>No waiting</td><td>939</td><td>353</td></tr>
+        <tr><td>Roundabout ahead</td><td>273</td><td>273</td></tr>
+        <tr><td>Speed limit 60kmh</td><td>189</td><td>189</td></tr>
+        <tr><th>Total</th><th>2,730</th><th>1,507</th></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li>
+        Perceptual-hash (pHash) filtering used a Hamming-distance threshold of 5 on 1,404 candidate
+        training images whose labels were limited to the heavy classes. It removed 902 images, leaving
+        1,216 training images before augmentation.
+      </li>
+      <li>
+        Every retained training image received a light augmentation pass (horizontal flip, probability
+        0.5). Images containing the rare speed-limit class also received up to three strong passes:
+        horizontal flip, rotation up to 12°, brightness/contrast, Gaussian blur, and shift/scale.
+        Bounding boxes were transformed with the images, clipped, and filtered by visibility.
+      </li>
+      <li>
+        Validation and test images were not augmented. No fixed-size preprocessing resize was enabled;
+        training used an input size of 832 pixels. Ultralytics reported caching 1,690 training images
+        and 191 validation images after preprocessing.
+      </li>
+    </ul>
+    <figure>
+      <img src="assets/training_label_distribution.jpg" alt="Training label-instance counts and box geometry distribution">
+      <figcaption>
+        Final training label distribution and bounding-box geometry from the saved training run.
+        The rare speed-limit class was substantially augmented; the plotted counts are post-augmentation.
+      </figcaption>
+    </figure>
+
+    <h2>2. Model training</h2>
+    <p>
+      A pretrained <strong>YOLO26n</strong> detector (<code>yolo26n.pt</code>) was fine-tuned using
+      Ultralytics. The configured run completed all 70 epochs; the CSV records approximately
+      1,844 seconds (30.7 minutes) of cumulative training time.
+    </p>
+    <table>
+      <thead><tr><th>Setting</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Image size</td><td>832</td></tr>
+        <tr><td>Epochs / batch size</td><td>70 / 12</td></tr>
+        <tr><td>Optimizer</td><td>AdamW</td></tr>
+        <tr><td>Initial learning rate</td><td>0.001</td></tr>
+        <tr><td>Early stopping patience</td><td>15 epochs</td></tr>
+        <tr><td>Training augmentation</td><td>Mosaic 0.3; mosaic disabled for final 10 epochs</td></tr>
+        <tr><td>Execution</td><td>GPU 0, 2 workers, image cache enabled, AMP enabled</td></tr>
+        <tr><td>Reproducibility</td><td>Seed 0; deterministic mode enabled in run arguments</td></tr>
+      </tbody>
+    </table>
+    <p>
+      Training and validation losses declined over the run while precision, recall, and mAP rose and
+      then largely plateaued. In the training CSV, the highest validation mAP@0.50:0.95 was 0.7635
+      at epoch 56 (validation precision 0.9502, recall 0.9543, and mAP@0.50 0.9711).
+    </p>
+    <figure>
+      <img src="assets/training_curves.png" alt="Training and validation losses and metrics across epochs">
+      <figcaption>Loss and detection-metric curves recorded during the 70-epoch training run.</figcaption>
+    </figure>
+
+    <h2>3. Evaluation</h2>
+    <h3>Held-out test results</h3>
+    <p>
+      The notebook loaded the saved best checkpoint and evaluated it on the dataset's test split at
+      832 pixels. These test-set metrics are distinct from the validation metrics used during training.
+    </p>
+    <table>
+      <thead><tr><th>Metric</th><th>Test result</th><th>Interpretation</th></tr></thead>
+      <tbody>
+        <tr><td>Precision</td><td>0.9686</td><td>High proportion of predicted detections were correct</td></tr>
+        <tr><td>Recall</td><td>0.9633</td><td>High proportion of labeled objects were detected</td></tr>
+        <tr><td>mAP@0.50</td><td>0.9727</td><td>Strong detection performance at IoU 0.50</td></tr>
+        <tr><td>mAP@0.50:0.95</td><td>0.7836</td><td>More stringent localization metric averaged across IoU thresholds</td></tr>
+      </tbody>
+    </table>
+    <p>Per-class AP@0.50 from the test precision-recall plot:</p>
+    <table>
+      <thead><tr><th>Class</th><th>AP@0.50</th></tr></thead>
+      <tbody>
+        <tr><td>No U-turn</td><td>0.995</td></tr>
+        <tr><td>No going opposite</td><td>0.958</td></tr>
+        <tr><td>No stopping</td><td>0.942</td></tr>
+        <tr><td>No waiting</td><td>0.952</td></tr>
+        <tr><td>Roundabout ahead</td><td>0.995</td></tr>
+        <tr><td>Speed limit 60kmh</td><td>0.995</td></tr>
+      </tbody>
+    </table>
+    <figure>
+      <img src="assets/test_precision_recall.png" alt="Test precision-recall curves for six traffic-sign classes">
+      <figcaption>Test precision-recall curves. The aggregate curve reports mAP@0.50 of approximately 0.973.</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/test_confusion_matrix.png" alt="Normalized test confusion matrix">
+      <figcaption>
+        Normalized test confusion matrix. Most true classes lie on the diagonal. Among background
+        false positives, “No going opposite” is the most frequent prediction (48% of the background
+        column in this normalized plot); “No stopping” and “No waiting” also show some mutual confusion.
+      </figcaption>
+    </figure>
+    <figure>
+      <img src="assets/test_predictions.jpg" alt="Model predictions over sample held-out traffic scenes">
+      <figcaption>Example detections on a held-out test batch, showing predicted sign labels and confidence scores.</figcaption>
+    </figure>
+
+    <h2>4. Conclusion and recommendations</h2>
+    <p class="callout">
+      The run demonstrates strong held-out test performance, with 0.9727 mAP@0.50 and 0.7836
+      mAP@0.50:0.95. Performance is strongest for No U-turn, Roundabout ahead, and Speed limit 60kmh;
+      No stopping and No waiting have the lowest per-class AP@0.50 and merit additional review.
+    </p>
+    <ul>
+      <li>Review background false positives, particularly predictions of “No going opposite.” Add representative hard-negative scenes if available.</li>
+      <li>Inspect the lower-performing No stopping and No waiting examples, including small, occluded, and overlapping signs; improve label consistency or add samples where appropriate.</li>
+      <li>Run a cross-split duplicate audit. The notebook's pHash pass only compares selected training images, so it does not establish that near-duplicates are absent from validation or test.</li>
+      <li>Before deployment, evaluate on additional routes, camera conditions, lighting, and weather. High offline scores alone do not establish road-safety readiness.</li>
+    </ul>
+    <p class="note small">
+      Source: supplied notebook and saved run artifacts in <code>runs/detect/train</code> and
+      <code>runs/detect/val</code>. Reported aggregate test metrics are the values printed by the
+      notebook's explicit <code>split="test"</code> evaluation; rounded per-class AP values are read
+      from its corresponding precision-recall plot.
+    </p>
+  </main>
+</body>
+</html>
